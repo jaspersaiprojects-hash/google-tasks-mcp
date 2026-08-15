@@ -4,38 +4,30 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { HonoSSETransport } from "../transport/mcp-transport.ts";
 import { registerAllTools } from "../tools/index.ts";
 import { createLogger } from "../utils/logger.ts";
-
 const logger = createLogger({ component: "mcp-endpoints" });
-
 export function handleMcpGet(c: Context) {
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
-
   const heartbeat = setInterval(() => {
     writer.write(encoder.encode(": ping\n\n")).catch(() => {
       clearInterval(heartbeat);
     });
   }, 15000);
-
   c.req.raw.signal.addEventListener("abort", () => {
     clearInterval(heartbeat);
     writer.close().catch(() => {});
   });
-
   const headers = {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
   };
-
   return new Response(readable, { headers });
 }
-
 export async function handleMcpPost(c: Context) {
   const mcpToken = c.get("mcpToken") as string;
-
   let message: JSONRPCMessage;
   try {
     message = await c.req.json() as JSONRPCMessage;
@@ -46,12 +38,10 @@ export async function handleMcpPost(c: Context) {
       error_description: "Request body is not valid JSON",
     }, 400);
   }
-
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
   let streamClosed = false;
-
   const closeStream = () => {
     if (streamClosed) {
       return;
@@ -59,7 +49,6 @@ export async function handleMcpPost(c: Context) {
     streamClosed = true;
     writer.close().catch(() => {});
   };
-
   const writeSSE = async (data: string, event?: string) => {
     if (streamClosed) {
       return;
@@ -73,7 +62,6 @@ export async function handleMcpPost(c: Context) {
       // Silently handle write errors (e.g. client disconnected)
     }
   };
-
   const transport = new HonoSSETransport();
   transport.attachStream({
     writeSSE: async (data: { data: string; event?: string; id?: string }) => {
@@ -84,7 +72,6 @@ export async function handleMcpPost(c: Context) {
       closeStream();
     },
   });
-
   (async () => {
     try {
       const sessionServer = new McpServer(
@@ -98,14 +85,10 @@ export async function handleMcpPost(c: Context) {
           },
         },
       );
-
       registerAllTools(sessionServer, mcpToken);
-
       await sessionServer.connect(transport);
       logger.info("MCP request handled statelessly via POST");
-
       await transport.handleIncomingMessage(message);
-
       // The stream is normally closed as soon as the response is written
       // (see writeSSE in attachStream). This timer is only a safety backstop
       // for messages that never produce a response (e.g. notifications), so it
@@ -119,17 +102,15 @@ export async function handleMcpPost(c: Context) {
       closeStream();
     }
   })();
-
   c.req.raw.signal.addEventListener("abort", () => {
     closeStream();
   });
-
   const headers = {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
+    "Mcp-Session-Id": crypto.randomUUID(),
   };
-
   return new Response(readable, { headers });
 }
